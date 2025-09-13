@@ -1,112 +1,73 @@
 # -*- coding: utf-8 -*-
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-from keras.models import Sequential
-from keras.optimizers import SGD
-from keras.layers import Input, Dense, Convolution2D, MaxPooling2D, AveragePooling2D, ZeroPadding2D, Dropout, Flatten, merge, Reshape, Activation
-from keras.layers.normalization import BatchNormalization
-from keras.models import Model
-from keras import backend as K
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.optimizers import legacy as optimizers
+from tensorflow.keras.layers import Input, Dense, Conv2D, MaxPooling2D, AveragePooling2D, ZeroPadding2D, Dropout, Flatten, Add, Reshape, Activation, BatchNormalization
+from tensorflow.keras.models import Model
+from tensorflow.keras import backend as K
+from tensorflow.keras.callbacks import CSVLogger
+import matplotlib.pyplot as plt
 
 from sklearn.metrics import log_loss
 
-from load_cifar10 import load_cifar10_data
+from load_data import load_data
 
 def identity_block(input_tensor, kernel_size, filters, stage, block):
-    """
-    The identity_block is the block that has no conv layer at shortcut
-    Arguments
-        input_tensor: input tensor
-        kernel_size: defualt 3, the kernel size of middle conv layer at main path
-        filters: list of integers, the nb_filters of 3 conv layer at main path
-        stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
-    """
-
     nb_filter1, nb_filter2, nb_filter3 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = Convolution2D(nb_filter1, 1, 1, name=conv_name_base + '2a')(input_tensor)
+    x = Conv2D(nb_filter1, (1, 1), name=conv_name_base + '2a')(input_tensor)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2a')(x)
     x = Activation('relu')(x)
 
-    x = Convolution2D(nb_filter2, kernel_size, kernel_size,
-                      border_mode='same', name=conv_name_base + '2b')(x)
+    x = Conv2D(nb_filter2, (kernel_size, kernel_size), padding='same', name=conv_name_base + '2b')(x)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2b')(x)
     x = Activation('relu')(x)
 
-    x = Convolution2D(nb_filter3, 1, 1, name=conv_name_base + '2c')(x)
+    x = Conv2D(nb_filter3, (1, 1), name=conv_name_base + '2c')(x)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2c')(x)
 
-    x = merge([x, input_tensor], mode='sum')
+    x = Add()([x, input_tensor])
     x = Activation('relu')(x)
     return x
 
 def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2)):
-    """
-    conv_block is the block that has a conv layer at shortcut
-    # Arguments
-        input_tensor: input tensor
-        kernel_size: defualt 3, the kernel size of middle conv layer at main path
-        filters: list of integers, the nb_filters of 3 conv layer at main path
-        stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
-    Note that from stage 3, the first conv layer at main path is with subsample=(2,2)
-    And the shortcut should have subsample=(2,2) as well
-    """
-
     nb_filter1, nb_filter2, nb_filter3 = filters
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
-    x = Convolution2D(nb_filter1, 1, 1, subsample=strides,
-                      name=conv_name_base + '2a')(input_tensor)
+    x = Conv2D(nb_filter1, (1, 1), strides=strides, name=conv_name_base + '2a')(input_tensor)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2a')(x)
     x = Activation('relu')(x)
 
-    x = Convolution2D(nb_filter2, kernel_size, kernel_size, border_mode='same',
-                      name=conv_name_base + '2b')(x)
+    x = Conv2D(nb_filter2, (kernel_size, kernel_size), padding='same', name=conv_name_base + '2b')(x)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2b')(x)
     x = Activation('relu')(x)
 
-    x = Convolution2D(nb_filter3, 1, 1, name=conv_name_base + '2c')(x)
+    x = Conv2D(nb_filter3, (1, 1), name=conv_name_base + '2c')(x)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2c')(x)
 
-    shortcut = Convolution2D(nb_filter3, 1, 1, subsample=strides,
-                             name=conv_name_base + '1')(input_tensor)
+    shortcut = Conv2D(nb_filter3, (1, 1), strides=strides, name=conv_name_base + '1')(input_tensor)
     shortcut = BatchNormalization(axis=bn_axis, name=bn_name_base + '1')(shortcut)
 
-    x = merge([x, shortcut], mode='sum')
+    x = Add()([x, shortcut])
     x = Activation('relu')(x)
     return x
 
 def resnet50_model(img_rows, img_cols, color_type=1, num_classes=None):
-    """
-    Resnet 50 Model for Keras
-
-    Model Schema is based on 
-    https://github.com/fchollet/deep-learning-models/blob/master/resnet50.py
-
-    ImageNet Pretrained Weights 
-    https://github.com/fchollet/deep-learning-models/releases/download/v0.2/resnet50_weights_th_dim_ordering_th_kernels.h5
-
-    Parameters:
-      img_rows, img_cols - resolution of inputs
-      channel - 1 for grayscale, 3 for color 
-      num_classes - number of class labels for our classification task
-    """
-
-    # Handle Dimension Ordering for different backends
     global bn_axis
-    if K.image_dim_ordering() == 'tf':
-      bn_axis = 3
-      img_input = Input(shape=(img_rows, img_cols, color_type))
+    if K.image_data_format() == 'channels_last':
+        bn_axis = 3
+        img_input = Input(shape=(img_rows, img_cols, color_type))
     else:
-      bn_axis = 1
-      img_input = Input(shape=(color_type, img_rows, img_cols))
+        bn_axis = 1
+        img_input = Input(shape=(color_type, img_rows, img_cols))
 
     x = ZeroPadding2D((3, 3))(img_input)
-    x = Convolution2D(64, 7, 7, subsample=(2, 2), name='conv1')(x)
+    x = Conv2D(64, (7, 7), strides=(2, 2), name='conv1')(x)
     x = BatchNormalization(axis=bn_axis, name='bn_conv1')(x)
     x = Activation('relu')(x)
     x = MaxPooling2D((3, 3), strides=(2, 2))(x)
@@ -131,68 +92,88 @@ def resnet50_model(img_rows, img_cols, color_type=1, num_classes=None):
     x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b')
     x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c')
 
-    # Fully Connected Softmax Layer
     x_fc = AveragePooling2D((7, 7), name='avg_pool')(x)
     x_fc = Flatten()(x_fc)
     x_fc = Dense(1000, activation='softmax', name='fc1000')(x_fc)
 
-    # Create model
     model = Model(img_input, x_fc)
 
-    # Load ImageNet pre-trained data 
-    if K.image_dim_ordering() == 'th':
-      # Use pre-trained weights for Theano backend
-      weights_path = 'imagenet_models/resnet50_weights_th_dim_ordering_th_kernels.h5'
-    else:
-      # Use pre-trained weights for Tensorflow backend
-      weights_path = 'imagenet_models/resnet50_weights_tf_dim_ordering_tf_kernels.h5'
-
-    model.load_weights(weights_path)
-
-    # Truncate and replace softmax layer for transfer learning
-    # Cannot use model.layers.pop() since model is not of Sequential() type
-    # The method below works since pre-trained weights are stored in layers but not in the model
     x_newfc = AveragePooling2D((7, 7), name='avg_pool')(x)
     x_newfc = Flatten()(x_newfc)
     x_newfc = Dense(num_classes, activation='softmax', name='fc10')(x_newfc)
 
-    # Create another model with our customized softmax
     model = Model(img_input, x_newfc)
 
-    # Learning rate is changed to 0.001
-    sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
-    model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
-  
+    sgd = optimizers.SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+    model.compile(optimizer=sgd, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+
     return model
 
 if __name__ == '__main__':
 
-    # Example to fine-tune on 3000 samples from Cifar10
-
-    img_rows, img_cols = 224, 224 # Resolution of inputs
+    img_rows, img_cols = 224, 224
     channel = 3
-    num_classes = 10 
+    num_classes = 2 
     batch_size = 16 
-    nb_epoch = 10
+    nb_epoch = 40
 
-    # Load Cifar10 data. Please implement your own load_data() module for your own dataset
-    X_train, Y_train, X_valid, Y_valid = load_cifar10_data(img_rows, img_cols)
+    X_train, Y_train, X_valid, Y_valid = load_data(img_rows, img_cols)
 
-    # Load our model
     model = resnet50_model(img_rows, img_cols, channel, num_classes)
 
-    # Start Fine-tuning
-    model.fit(X_train, Y_train,
+    csv_logger = CSVLogger('training_history.csv', separator=',', append=False)
+
+    history=model.fit(X_train, Y_train,
               batch_size=batch_size,
-              nb_epoch=nb_epoch,
+              epochs=nb_epoch,
               shuffle=True,
               verbose=1,
-              validation_data=(X_valid, Y_valid),
-              )
+              validation_data=(X_valid, Y_valid))
+    model.save_weights('weights/resnet50_weights.h5')
 
-    # Make predictions
+    #save loss plots
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Training Loss')
+    plt.title('Training and Validation Loss')
+    # plt.legend()
+    plt.savefig('plots/resnet50_training_loss_plot.png')
+    plt.close()
+
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Validation Loss')
+    plt.title('Validation Loss')
+    # plt.legend()
+    plt.savefig('plots/resnet50_validation_loss_plot.png')
+    plt.close()
+
+
+
+    # Save accuracy plots
+    plt.plot(history.history['accuracy'], label='Training Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Training Accuracy')
+    plt.title('Training Accuracy')
+    # plt.legend()
+    plt.savefig('plots/resnet50_training_accuracy_plot.png')
+    plt.close()
+
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Validation Accuracy')
+    plt.title('Validation Accuracy')
+    # plt.legend()
+    plt.savefig('plots/resnet50_validation_accuracy_plot.png')
+    plt.close()
+
+
+    print('Loss and accuracy plots saved')
+
+
+
+
+
     predictions_valid = model.predict(X_valid, batch_size=batch_size, verbose=1)
 
-    # Cross-entropy loss score
     score = log_loss(Y_valid, predictions_valid)
-

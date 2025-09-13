@@ -1,21 +1,24 @@
-# -*- coding: utf-8 -*-
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-from keras.optimizers import SGD
-from keras.layers import Input, merge, ZeroPadding2D
-from keras.layers.core import Dense, Dropout, Activation
-from keras.layers.convolutional import Convolution2D
-from keras.layers.pooling import AveragePooling2D, GlobalAveragePooling2D, MaxPooling2D
-from keras.layers.normalization import BatchNormalization
-from keras.models import Model
-import keras.backend as K
+import tensorflow as tf 
+from tensorflow.keras.optimizers import SGD
+from tensorflow.keras.layers import Input, ZeroPadding2D, Dense, Dropout, Activation
+from tensorflow.keras.layers import Conv2D
+from tensorflow.keras.layers import AveragePooling2D, GlobalAveragePooling2D, MaxPooling2D
+from tensorflow.keras.layers import BatchNormalization
+from tensorflow.keras.models import Model
+import tensorflow.keras.backend as K
+from tensorflow.keras.callbacks import CSVLogger
+import matplotlib.pyplot as plt
 
 from sklearn.metrics import log_loss
 
 from custom_layers.scale_layer import Scale
 
-from load_cifar10 import load_cifar10_data
+# from load_data import load_data  # Adjust this import based on your data loading module
 
-def densenet169_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth_rate=32, nb_filter=64, reduction=0.5, dropout_rate=0.0, weight_decay=1e-4, num_classes=None):
+def densenet169_model(img_rows, img_cols, color_type=3, nb_dense_block=4, growth_rate=32, nb_filter=64, reduction=0.5, dropout_rate=0.0, weight_decay=1e-4, num_classes=None):
     '''
     DenseNet 169 Model for Keras
 
@@ -43,14 +46,18 @@ def densenet169_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
     # compute compression factor
     compression = 1.0 - reduction
 
-    # Handle Dimension Ordering for different backends
+    # Determine the image data format
     global concat_axis
-    if K.image_dim_ordering() == 'tf':
-      concat_axis = 3
-      img_input = Input(shape=(224, 224, 3), name='data')
+    if K.image_data_format() == 'channels_last':
+      concat_axis = -1
     else:
       concat_axis = 1
-      img_input = Input(shape=(3, 224, 224), name='data')
+
+    # Define input shape based on the image data format
+    if K.image_data_format() == 'channels_last':
+      img_input = Input(shape=(img_rows, img_cols, color_type), name='data')
+    else:
+      img_input = Input(shape=(color_type, img_rows, img_cols), name='data')
 
     # From architecture for ImageNet (Table 1 in the paper)
     nb_filter = 64
@@ -58,7 +65,7 @@ def densenet169_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
 
     # Initial convolution
     x = ZeroPadding2D((3, 3), name='conv1_zeropadding')(img_input)
-    x = Convolution2D(nb_filter, 7, 7, subsample=(2, 2), name='conv1', bias=False)(x)
+    x = Conv2D(nb_filter, 7, strides=(2, 2), name='conv1', use_bias=False)(x)
     x = BatchNormalization(epsilon=eps, axis=concat_axis, name='conv1_bn')(x)
     x = Scale(axis=concat_axis, name='conv1_scale')(x)
     x = Activation('relu', name='relu1')(x)
@@ -67,7 +74,7 @@ def densenet169_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
 
     # Add dense blocks
     for block_idx in range(nb_dense_block - 1):
-        stage = block_idx+2
+        stage = block_idx + 2
         x, nb_filter = dense_block(x, stage, nb_layers[block_idx], nb_filter, growth_rate, dropout_rate=dropout_rate, weight_decay=weight_decay)
 
         # Add transition_block
@@ -87,18 +94,11 @@ def densenet169_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
 
     model = Model(img_input, x_fc, name='densenet')
 
-    if K.image_dim_ordering() == 'th':
-      # Use pre-trained weights for Theano backend
-      weights_path = 'imagenet_models/densenet169_weights_th.h5'
-    else:
-      # Use pre-trained weights for Tensorflow backend
-      weights_path = 'imagenet_models/densenet169_weights_tf.h5'
-
-    model.load_weights(weights_path, by_name=True)
+    # Use pre-trained weights for TensorFlow backend
+    # weights_path = './imagenet_models/weights.h5'
+    # model.load_weights(weights_path, by_name=True)
 
     # Truncate and replace softmax layer for transfer learning
-    # Cannot use model.layers.pop() since model is not of Sequential() type
-    # The method below works since pre-trained weights are stored in layers but not in the model
     x_newfc = GlobalAveragePooling2D(name='pool'+str(final_stage))(x)
     x_newfc = Dense(num_classes, name='fc6')(x_newfc)
     x_newfc = Activation('softmax', name='prob')(x_newfc)
@@ -106,11 +106,10 @@ def densenet169_model(img_rows, img_cols, color_type=1, nb_dense_block=4, growth
     model = Model(img_input, x_newfc)
 
     # Learning rate is changed to 0.001
-    sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
-    model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
+    sgd = SGD(learning_rate=1e-3, momentum=0.9, nesterov=True)
+    model.compile(optimizer=sgd, loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), metrics=['accuracy'])
 
     return model
-
 
 def conv_block(x, stage, branch, nb_filter, dropout_rate=None, weight_decay=1e-4):
     '''Apply BatchNorm, Relu, bottleneck 1x1 Conv2D, 3x3 Conv2D, and option dropout
@@ -131,7 +130,7 @@ def conv_block(x, stage, branch, nb_filter, dropout_rate=None, weight_decay=1e-4
     x = BatchNormalization(epsilon=eps, axis=concat_axis, name=conv_name_base+'_x1_bn')(x)
     x = Scale(axis=concat_axis, name=conv_name_base+'_x1_scale')(x)
     x = Activation('relu', name=relu_name_base+'_x1')(x)
-    x = Convolution2D(inter_channel, 1, 1, name=conv_name_base+'_x1', bias=False)(x)
+    x = Conv2D(inter_channel, 1, padding='same', name=conv_name_base+'_x1', kernel_initializer='he_normal', use_bias=False)(x)
 
     if dropout_rate:
         x = Dropout(dropout_rate)(x)
@@ -140,8 +139,7 @@ def conv_block(x, stage, branch, nb_filter, dropout_rate=None, weight_decay=1e-4
     x = BatchNormalization(epsilon=eps, axis=concat_axis, name=conv_name_base+'_x2_bn')(x)
     x = Scale(axis=concat_axis, name=conv_name_base+'_x2_scale')(x)
     x = Activation('relu', name=relu_name_base+'_x2')(x)
-    x = ZeroPadding2D((1, 1), name=conv_name_base+'_x2_zeropadding')(x)
-    x = Convolution2D(nb_filter, 3, 3, name=conv_name_base+'_x2', bias=False)(x)
+    x = Conv2D(nb_filter, 3, padding='same', name=conv_name_base+'_x2', kernel_initializer='he_normal', use_bias=False)(x)
 
     if dropout_rate:
         x = Dropout(dropout_rate)(x)
@@ -168,7 +166,7 @@ def transition_block(x, stage, nb_filter, compression=1.0, dropout_rate=None, we
     x = BatchNormalization(epsilon=eps, axis=concat_axis, name=conv_name_base+'_bn')(x)
     x = Scale(axis=concat_axis, name=conv_name_base+'_scale')(x)
     x = Activation('relu', name=relu_name_base)(x)
-    x = Convolution2D(int(nb_filter * compression), 1, 1, name=conv_name_base, bias=False)(x)
+    x = Conv2D(int(nb_filter * compression), 1, padding='same', name=conv_name_base, kernel_initializer='he_normal', use_bias=False)(x)
 
     if dropout_rate:
         x = Dropout(dropout_rate)(x)
@@ -195,9 +193,9 @@ def dense_block(x, stage, nb_layers, nb_filter, growth_rate, dropout_rate=None, 
     concat_feat = x
 
     for i in range(nb_layers):
-        branch = i+1
+        branch = i + 1
         x = conv_block(concat_feat, stage, branch, growth_rate, dropout_rate, weight_decay)
-        concat_feat = merge([concat_feat, x], mode='concat', concat_axis=concat_axis, name='concat_'+str(stage)+'_'+str(branch))
+        concat_feat = tf.concat([concat_feat, x], axis=concat_axis, name='concat_'+str(stage)+'_'+str(branch))
 
         if grow_nb_filters:
             nb_filter += growth_rate
@@ -205,32 +203,75 @@ def dense_block(x, stage, nb_layers, nb_filter, growth_rate, dropout_rate=None, 
     return concat_feat, nb_filter
 
 if __name__ == '__main__':
-
     # Example to fine-tune on 3000 samples from Cifar10
-
-    img_rows, img_cols = 224, 224 # Resolution of inputs
-    channel = 3
-    num_classes = 10 
+    img_rows, img_cols = 224, 224  # Adjust according to your input image size
+    channel = 3  # Adjust according to the number of channels in your images
+    num_classes = 2  # Adjust according to the number of classes in your dataset
     batch_size = 16 
-    nb_epoch = 10
+    nb_epoch = 30  # Adjust according to your training needs
 
-    # Load Cifar10 data. Please implement your own load_data() module for your own dataset
-    X_train, Y_train, X_valid, Y_valid = load_cifar10_data(img_rows, img_cols)
+    # Load your data. Replace `load_data` with your data loading function/module
+    X_train, Y_train, X_valid, Y_valid = load_data(img_rows, img_cols)
 
-    # Load our model
+    # Load the model
     model = densenet169_model(img_rows=img_rows, img_cols=img_cols, color_type=channel, num_classes=num_classes)
 
+    csv_logger = CSVLogger('training_history.csv', separator=',', append=False)
     # Start Fine-tuning
-    model.fit(X_train, Y_train,
+    history=model.fit(X_train, Y_train,
               batch_size=batch_size,
-              nb_epoch=nb_epoch,
+              epochs=nb_epoch,
               shuffle=True,
               verbose=1,
-              validation_data=(X_valid, Y_valid),
-              )
+              validation_data=(X_valid, Y_valid))
+    model.save_weights('weights/weights.h5')
+
+
+    #save loss plots
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Training Loss')
+    plt.title('Training and Validation Loss')
+    # plt.legend()
+    plt.savefig('plots/training_loss_plot.png')
+    plt.close()
+
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Validation Loss')
+    plt.title('Validation Loss')
+    # plt.legend()
+    plt.savefig('plots/validation_loss_plot.png')
+    plt.close()
+
+
+
+    # Save accuracy plots
+    plt.plot(history.history['accuracy'], label='Training Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Training Accuracy')
+    plt.title('Training Accuracy')
+    # plt.legend()
+    plt.savefig('plots/training_accuracy_plot.png')
+    plt.close()
+
+    plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Validation Accuracy')
+    plt.title('Validation Accuracy')
+    # plt.legend()
+    plt.savefig('plots/validation_accuracy_plot.png')
+    plt.close()
+
+
+    print('Loss and accuracy plots saved')
+
+
 
     # Make predictions
     predictions_valid = model.predict(X_valid, batch_size=batch_size, verbose=1)
 
-    # Cross-entropy loss score
+    # Calculate cross-entropy loss score
     score = log_loss(Y_valid, predictions_valid)
+
+# Note: Adjust file paths and data loading functions according to your specific setup.

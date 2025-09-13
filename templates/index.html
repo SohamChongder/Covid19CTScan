@@ -1,0 +1,198 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COVID-19 Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #container {
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            width: 400px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .upload-btn {
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        .upload-btn:hover {
+            background-color: #0056b3;
+        }
+
+        #result {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>COVID-19 Detection</h1>
+        <form id="upload-form" enctype="multipart/form-data">
+            <label for="image" class="upload-btn">Choose Image</label>
+            <input type="file" id="image" name="file">
+            <button type="submit" class="upload-btn">Predict</button>
+        </form>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        document.getElementById('upload-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const formData = new FormData();
+            const fileInput = document.getElementById('image');
+            formData.append('file', fileInput.files[0]);
+
+            const response = await fetch('/predict', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            document.getElementById('result').innerText = `Prediction: ${data.prediction}`;
+        });
+    </script>
+</body> 
+</html>-->
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COVID-19 Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+    
+        #container {
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            width: 400px;
+            text-align: center;
+        }
+    
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+    
+        input[type="file"] {
+            display: none;
+        }
+    
+        .upload-btn {
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+            margin-bottom: 10px; /* Add margin below the "Choose Image" button */
+        }
+    
+        .upload-btn:hover {
+            background-color: #0056b3;
+        }
+    
+        #result {
+            margin-top: 20px;
+            font-size: 18px;
+            color: #333;
+        }
+    
+        #uploaded-img {
+            display: none;
+            margin-top: 20px;
+            max-width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+    
+</head>
+<body>
+    <div id="container">
+        <h1>COVID-19 Detection</h1>
+        <form id="upload-form" enctype="multipart/form-data">
+            <label for="image" class="upload-btn">Choose Image</label>
+            <input type="file" id="image" name="file">
+        </form>
+        <div id="uploaded-img-container">
+            <img id="uploaded-img" src="#" alt="Uploaded Image">
+        </div>
+        <button id="predict-btn" class="upload-btn">Predict</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // Function to display the uploaded image
+        document.getElementById('image').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            const uploadedImg = document.getElementById('uploaded-img');
+            uploadedImg.src = URL.createObjectURL(file);
+            uploadedImg.style.display = 'block';
+            
+            // Clear prediction result
+            document.getElementById('result').innerText = '';
+        });
+    
+        // Function to handle prediction
+        document.getElementById('predict-btn').addEventListener('click', async function() {
+            const formData = new FormData();
+            const fileInput = document.getElementById('image');
+            formData.append('file', fileInput.files[0]);
+    
+            const response = await fetch('/predict', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            document.getElementById('result').innerText = `Prediction: ${data.prediction}`;
+        });
+    </script>
+</body>
+</html>
